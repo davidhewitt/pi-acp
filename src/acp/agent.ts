@@ -4,6 +4,8 @@ import {
   type AgentSideConnection,
   type AuthenticateRequest,
   type CancelNotification,
+  type CloseSessionRequest,
+  type CloseSessionResponse,
   type InitializeRequest,
   type InitializeResponse,
   type ListSessionsRequest,
@@ -265,7 +267,8 @@ export class PiAcpAgent implements ACPAgent {
           // **UNSTABLE** ACP capability used by Zed's codex-acp adapter.
           // Enables a native session picker in clients that support it.
           list: {},
-          delete: {}
+          delete: {},
+          close: {}
         }
       }
     }
@@ -373,15 +376,7 @@ export class PiAcpAgent implements ACPAgent {
           updateNotice
         })
 
-    if (preludeText)
-      session.setStartupInfo(preludeText)
-
-      // Policy: within a single ACP connection (one client window), keep only one live pi subprocess.
-      // This avoids leaking subprocesses when clients start new sessions but don't explicitly close old ones.
-      // It does NOT affect other client windows because they run in separate agent processes.
-      //
-      // (Tests sometimes stub out `this.sessions`, so guard the call.)
-    ;(this.sessions as any).closeAllExcept?.(session.sessionId)
+    if (preludeText) session.setStartupInfo(preludeText)
 
     const response = {
       sessionId: session.sessionId,
@@ -962,10 +957,6 @@ export class PiAcpAgent implements ACPAgent {
     const { configOptions, models, modes } = configuration
     const fileCommands = loadSlashCommands(params.cwd)
 
-    // Policy: within a single ACP connection (one Zed window), keep only one live pi subprocess.
-    // (Tests sometimes stub out `this.sessions`, so guard the call.)
-    ;(this.sessions as any).closeAllExcept?.(session.sessionId)
-
     // (Optional) ensure mapping stays fresh.
     this.store.upsert({
       sessionId: params.sessionId,
@@ -1118,7 +1109,14 @@ export class PiAcpAgent implements ACPAgent {
     return response
   }
 
+  async closeSession(params: CloseSessionRequest): Promise<CloseSessionResponse> {
+    this.sessions.close(params.sessionId)
+    return {}
+  }
+
   async deleteSession(params: DeleteSessionRequest): Promise<DeleteSessionResponse> {
+    this.sessions.close(params.sessionId)
+
     const stored = this.store.get(params.sessionId)
     const piSession = findPiSession(params.sessionId)
 

@@ -186,25 +186,13 @@ export class SessionManager {
 
   /**
    * Dispose a session's underlying pi process and remove it from the manager.
-   * Used when clients explicitly reload a session and we want a fresh pi subprocess.
+   * Used when clients explicitly close or reload a session.
    */
   close(sessionId: string): void {
-    const s = this.sessions.get(sessionId)
-    if (!s) return
-    try {
-      s.proc.dispose?.()
-    } catch {
-      // ignore
-    }
+    const session = this.sessions.get(sessionId)
+    if (!session) return
     this.sessions.delete(sessionId)
-  }
-
-  /** Close all sessions except the one with `keepSessionId`. */
-  closeAllExcept(keepSessionId: string): void {
-    for (const [id] of this.sessions) {
-      if (id === keepSessionId) continue
-      this.close(id)
-    }
+    session.dispose()
   }
 
   async create(params: SessionCreateParams): Promise<PiAcpSession> {
@@ -302,6 +290,7 @@ export class PiAcpSession {
   // Current in-flight turn (if any). Additional prompts are queued.
   private pendingTurn: PendingTurn | null = null
   private readonly turnQueue: QueuedTurn[] = []
+  private disposed = false
   // Track tool call statuses and ensure they are monotonic (pending -> in_progress -> completed).
   // Some pi events can arrive out of order (e.g. late toolcall_* deltas after execution starts),
   // and clients may hide progress if we ever downgrade back to `pending`.
@@ -365,6 +354,8 @@ export class PiAcpSession {
   }
 
   async prompt(message: string, images: unknown[] = [], title?: string): Promise<StopReason> {
+    if (this.disposed) return 'cancelled'
+
     // pi RPC mode disables slash command expansion, so we do it here.
     const expandedMessage = expandSlashCommand(message, this.fileCommands)
 
@@ -400,6 +391,22 @@ export class PiAcpSession {
     })
 
     return turnPromise
+  }
+
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.cancelRequested = true
+
+    const queued = this.turnQueue.splice(0, this.turnQueue.length)
+    for (const turn of queued) turn.resolve('cancelled')
+
+    this.pendingTurn?.resolve('cancelled')
+    this.pendingTurn = null
+    this.inAgentLoop = false
+
+    void this.proc.abort().catch(() => {})
+    this.proc.dispose()
   }
 
   async cancel(): Promise<void> {

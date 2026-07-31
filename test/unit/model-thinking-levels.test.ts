@@ -15,6 +15,7 @@ function fixture() {
   const calls: string[] = []
   const proc = {
     onEvent: () => () => {},
+    abort: async () => {},
     getMessages: async () => ({ messages: [] }),
     getState: async () => state,
     getAvailableModels: async () => ({
@@ -218,6 +219,7 @@ for (const failure of ['discovery', 'missing-current', 'inconsistent-current', '
       conn: asAgentConn(conn),
       proc: {
         onEvent: () => () => {},
+        abort: async () => {},
         dispose() {
           existingDisposed++
         }
